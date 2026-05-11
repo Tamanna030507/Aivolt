@@ -1,12 +1,15 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
+  "/page": "app/page.js",
   "/api/market-data/indices/route": "app/api/market-data/indices/route.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/api/market-data/history/route": "app/api/market-data/history/route.js",
   "/api/portfolio/route": "app/api/portfolio/route.js",
   "/trade/page": "app/trade/page.js",
-  "/profile/page": "app/profile/page.js",
+  "/api/ai-signal/route": "app/api/ai-signal/route.js",
+  "/api/market-data/quote/route": "app/api/market-data/quote/route.js",
+  "/api/trades/route": "app/api/trades/route.js",
+  "/markets/page": "app/markets/page.js",
+  "/api/market-data/quotes/route": "app/api/market-data/quotes/route.js",
   "/paper-trading/page": "app/paper-trading/page.js",
-  "/news/page": "app/news/page.js",
-  "/api/news/route": "app/api/news/route.js",
-  "/safety/page": "app/safety/page.js",
-  "/page": "app/page.js"
+  "/api/pnl/route": "app/api/pnl/route.js"
 }
