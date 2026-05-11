@@ -79,6 +79,7 @@ export default function PnLChart() {
 
   return (
     <div className="panel p-4">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="text-xs font-mono text-text-muted mb-1">PROFIT & LOSS</div>
@@ -110,6 +111,7 @@ export default function PnLChart() {
         </div>
       </div>
 
+      {/* Chart */}
       {loading ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-xs font-mono animate-pulse">
           Loading P&L data...

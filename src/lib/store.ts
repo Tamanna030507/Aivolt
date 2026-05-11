@@ -40,47 +40,40 @@ export interface AIActivity {
 }
 
 interface AppState {
-  // User
   user: User | null
   setUser: (user: User | null) => void
 
-  // Paper trading mode
   isPaperMode: boolean
   setIsPaperMode: (v: boolean) => void
 
-  // Portfolio
   holdings: Holding[]
   setHoldings: (holdings: Holding[]) => void
 
-  // Wallet values
   portfolioValue: number
   todayPnL: number
   todayPnLPercent: number
   setPortfolioData: (value: number, pnl: number, pnlPercent: number) => void
 
-  // AI Activity
   aiActivities: AIActivity[]
   addAIActivity: (activity: AIActivity) => void
 
-  // AI Status
   aiStatus: 'Active' | 'Hibernating' | 'Paused'
   setAIStatus: (status: 'Active' | 'Hibernating' | 'Paused') => void
   lastAIAction: string
   setLastAIAction: (action: string) => void
 
-  // Selected stock for chart
+  autopilotEnabled: boolean
+  setAutopilotEnabled: (v: boolean) => void
+
   selectedSymbol: string
   setSelectedSymbol: (symbol: string) => void
 
-  // Panic mode
   panicMode: boolean
   setPanicMode: (v: boolean) => void
 
-  // Notifications count
   unreadNotifications: number
   setUnreadNotifications: (n: number) => void
 
-  // Onboarding
   onboardingComplete: boolean
   setOnboardingComplete: (v: boolean) => void
 }
@@ -114,6 +107,9 @@ export const useAppStore = create<AppState>()(
       lastAIAction: 'Analyzing markets...',
       setLastAIAction: (action) => set({ lastAIAction: action }),
 
+      autopilotEnabled: false,
+      setAutopilotEnabled: (v) => set({ autopilotEnabled: v }),
+
       selectedSymbol: 'RELIANCE.NS',
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
 
@@ -132,6 +128,7 @@ export const useAppStore = create<AppState>()(
         user: state.user,
         isPaperMode: state.isPaperMode,
         onboardingComplete: state.onboardingComplete,
+        autopilotEnabled: state.autopilotEnabled,
       }),
     }
   )
