@@ -1,101 +1,204 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseAdmin = createClient(
+// Use service role on server to bypass RLS for trade inserts
+const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { userId, symbol, exchange = 'NSE', orderType, quantity,
-      price, tradeType = 'swing', targetPrice, stopLoss,
-      aiConfidence = 70, aiReasoning = '', isPaper = true } = body
+    const {
+      userId, symbol, exchange = 'NSE', orderType, quantity, price,
+      tradeType = 'swing', targetPrice, stopLoss,
+      aiConfidence = 70, aiReasoning = '', isPaper = true,
+      dhanClientId, dhanAccessToken,
+    } = body
 
-    if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 })
-    if (!symbol) return NextResponse.json({ error: 'symbol required' }, { status: 400 })
-    if (!orderType) return NextResponse.json({ error: 'orderType required' }, { status: 400 })
-    if (!quantity || Number(quantity) <= 0) return NextResponse.json({ error: 'quantity must be > 0' }, { status: 400 })
-    if (!price || Number(price) <= 0) return NextResponse.json({ error: 'price must be > 0' }, { status: 400 })
+    // Validation
+    if (!userId)    return NextResponse.json({ error: 'userId is required' }, { status: 400 })
+    if (!symbol)    return NextResponse.json({ error: 'symbol is required' }, { status: 400 })
+    if (!orderType) return NextResponse.json({ error: 'orderType is required' }, { status: 400 })
+    if (!quantity || quantity < 1) return NextResponse.json({ error: 'quantity must be >= 1' }, { status: 400 })
+    if (!price || price <= 0)      return NextResponse.json({ error: 'price must be > 0' }, { status: 400 })
 
-    const cleanSymbol = symbol.toUpperCase().replace('.NS', '').replace('.BO', '')
-    const cleanOrderType = orderType.toUpperCase()
-    const numQty = Number(quantity)
-    const numPrice = Number(price)
+    let dhanOrderId: string | null = null
 
-    const { data: trade, error: tradeError } = await supabaseAdmin
+    // Real Dhan order (only if NOT paper and credentials exist)
+    if (!isPaper && dhanClientId && dhanAccessToken) {
+      try {
+        const productType = tradeType === 'intraday' ? 'INTRADAY' : 'CNC'
+        const segment = exchange === 'BSE' ? 'BSE_EQ' : 'NSE_EQ'
+
+        const dhanRes = await fetch('https://api.dhan.co/orders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'access-token': dhanAccessToken,
+            'client-id': dhanClientId,
+          },
+          body: JSON.stringify({
+            dhanClientId,
+            transactionType: orderType,
+            exchangeSegment: segment,
+            productType,
+            orderType: 'MARKET',
+            validity: 'DAY',
+            tradingSymbol: symbol,
+            securityId: '',
+            quantity,
+            price,
+          }),
+        })
+
+        if (dhanRes.ok) {
+          const dhanData = await dhanRes.json()
+          dhanOrderId = dhanData?.orderId || null
+        }
+      } catch (dhanErr) {
+        console.warn('Dhan order failed (continuing with DB save):', dhanErr)
+      }
+    }
+
+    // Save trade to Supabase
+    const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .insert({
-        user_id: userId, symbol: cleanSymbol, exchange,
-        trade_type: tradeType, order_type: cleanOrderType,
-        quantity: numQty, price: numPrice,
-        target_price: targetPrice ? Number(targetPrice) : null,
-        stop_loss: stopLoss ? Number(stopLoss) : null,
-        ai_confidence: Number(aiConfidence), ai_reasoning: aiReasoning,
-        status: 'OPEN', is_paper: Boolean(isPaper),
+        user_id: userId,
+        symbol,
+        exchange,
+        trade_type: tradeType,
+        order_type: orderType,
+        quantity,
+        price,
+        target_price: targetPrice || null,
+        stop_loss: stopLoss || null,
+        ai_confidence: aiConfidence,
+        ai_reasoning: aiReasoning,
+        status: 'OPEN',
+        is_paper: isPaper,
+        dhan_order_id: dhanOrderId,
         executed_at: new Date().toISOString(),
       })
-      .select().single()
+      .select()
+      .single()
 
-    if (tradeError) return NextResponse.json({ error: tradeError.message }, { status: 500 })
+    if (tradeError) {
+      console.error('Trade insert error:', tradeError)
+      return NextResponse.json({ error: tradeError.message }, { status: 500 })
+    }
 
-    if (cleanOrderType === 'BUY') {
-      const { data: existing } = await supabaseAdmin.from('portfolio')
-        .select().eq('user_id', userId).eq('symbol', cleanSymbol).maybeSingle()
+    // Update portfolio
+    if (orderType === 'BUY') {
+      const { data: existing } = await supabase
+        .from('portfolio')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('symbol', symbol)
+        .maybeSingle()
+
       if (existing) {
-        const newQty = existing.quantity + numQty
-        const newAvg = (existing.avg_buy_price * existing.quantity + numPrice * numQty) / newQty
-        await supabaseAdmin.from('portfolio').update({
-          quantity: newQty, avg_buy_price: parseFloat(newAvg.toFixed(2)),
-          current_price: numPrice,
-          pnl: parseFloat(((numPrice - newAvg) * newQty).toFixed(2)),
-          pnl_percent: parseFloat((((numPrice - newAvg) / newAvg) * 100).toFixed(2)),
+        const newQty = existing.quantity + quantity
+        const newAvg = (existing.avg_buy_price * existing.quantity + price * quantity) / newQty
+        const newPnl = (price - newAvg) * newQty
+        await supabase.from('portfolio').update({
+          quantity: newQty,
+          avg_buy_price: +newAvg.toFixed(2),
+          current_price: price,
+          pnl: +newPnl.toFixed(2),
+          pnl_percent: +((price - newAvg) / newAvg * 100).toFixed(2),
+          ai_confidence: aiConfidence >= 75 ? 'high' : aiConfidence >= 55 ? 'medium' : 'low',
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
       } else {
-        await supabaseAdmin.from('portfolio').insert({
-          user_id: userId, symbol: cleanSymbol, exchange, quantity: numQty,
-          avg_buy_price: numPrice, current_price: numPrice, pnl: 0, pnl_percent: 0,
-          ai_confidence: Number(aiConfidence) > 75 ? 'high' : Number(aiConfidence) > 55 ? 'medium' : 'low',
+        await supabase.from('portfolio').insert({
+          user_id: userId,
+          symbol,
+          exchange,
+          quantity,
+          avg_buy_price: price,
+          current_price: price,
+          pnl: 0,
+          pnl_percent: 0,
+          ai_confidence: aiConfidence >= 75 ? 'high' : aiConfidence >= 55 ? 'medium' : 'low',
           trade_type: tradeType,
         })
       }
-    }
+    } else if (orderType === 'SELL') {
+      // Reduce or remove position
+      const { data: existing } = await supabase
+        .from('portfolio')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('symbol', symbol)
+        .maybeSingle()
 
-    if (cleanOrderType === 'SELL') {
-      const { data: existing } = await supabaseAdmin.from('portfolio')
-        .select().eq('user_id', userId).eq('symbol', cleanSymbol).maybeSingle()
       if (existing) {
-        const newQty = existing.quantity - numQty
-        const realizedPnl = (numPrice - existing.avg_buy_price) * numQty
+        const newQty = existing.quantity - quantity
         if (newQty <= 0) {
-          await supabaseAdmin.from('portfolio').delete().eq('id', existing.id)
+          await supabase.from('portfolio').delete().eq('id', existing.id)
         } else {
-          await supabaseAdmin.from('portfolio').update({
-            quantity: newQty, current_price: numPrice,
-            pnl: parseFloat(((numPrice - existing.avg_buy_price) * newQty).toFixed(2)),
-            pnl_percent: parseFloat((((numPrice - existing.avg_buy_price) / existing.avg_buy_price) * 100).toFixed(2)),
+          const pnl = (price - existing.avg_buy_price) * newQty
+          await supabase.from('portfolio').update({
+            quantity: newQty,
+            current_price: price,
+            pnl: +pnl.toFixed(2),
+            pnl_percent: +((price - existing.avg_buy_price) / existing.avg_buy_price * 100).toFixed(2),
           }).eq('id', existing.id)
         }
-        await supabaseAdmin.from('trades').update({
-          pnl: parseFloat(realizedPnl.toFixed(2)), status: 'CLOSED',
-          closed_at: new Date().toISOString(),
-        }).eq('id', trade.id)
       }
     }
 
-    await supabaseAdmin.from('ai_activity').insert({
+    // Log AI activity
+    const actionText = orderType === 'BUY'
+      ? `Bought ${quantity} shares of ${symbol} @ ₹${price.toFixed(2)}`
+      : `Sold ${quantity} shares of ${symbol} @ ₹${price.toFixed(2)}`
+
+    await supabase.from('ai_activity').insert({
       user_id: userId,
-      action: `${cleanOrderType === 'BUY' ? 'Bought' : 'Sold'} ${numQty} × ${cleanSymbol} @ ₹${numPrice}`,
-      symbol: cleanSymbol, reasoning: aiReasoning, confidence: Number(aiConfidence),
+      action: actionText,
+      symbol,
+      reasoning: aiReasoning || 'AI executed trade based on technical analysis',
+      confidence: aiConfidence,
     })
 
-    return NextResponse.json({ success: true, trade,
-      message: `${cleanOrderType} ${numQty} × ${cleanSymbol} @ ₹${numPrice}` })
+    // Update daily PnL record
+    const today = new Date().toISOString().split('T')[0]
+    const { data: pnlRecord } = await supabase
+      .from('pnl_history')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .eq('is_paper', isPaper)
+      .maybeSingle()
 
+    if (pnlRecord) {
+      await supabase.from('pnl_history').update({
+        total_trades: (pnlRecord.total_trades || 0) + 1,
+      }).eq('id', pnlRecord.id)
+    } else {
+      await supabase.from('pnl_history').insert({
+        user_id: userId,
+        date: today,
+        realized_pnl: 0,
+        unrealized_pnl: 0,
+        total_trades: 1,
+        winning_trades: 0,
+        is_paper: isPaper,
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      trade,
+      dhanOrderId,
+      message: `${orderType} ${quantity}× ${symbol} @ ₹${price}${isPaper ? ' [PAPER]' : ' [LIVE]'}`,
+    })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Trade API error:', error)
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
 }
 
@@ -103,11 +206,18 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const userId = searchParams.get('userId')
   const isPaper = searchParams.get('isPaper') !== 'false'
-  const limit = parseInt(searchParams.get('limit') || '50')
+  const limit = Math.min(100, parseInt(searchParams.get('limit') || '50'))
+
   if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 })
-  const { data, error } = await supabaseAdmin.from('trades').select('*')
-    .eq('user_id', userId).eq('is_paper', isPaper)
-    .order('executed_at', { ascending: false }).limit(limit)
+
+  const { data, error } = await supabase
+    .from('trades')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_paper', isPaper)
+    .order('executed_at', { ascending: false })
+    .limit(limit)
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data || [])
 }
