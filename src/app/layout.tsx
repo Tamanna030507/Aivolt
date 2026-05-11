@@ -1,24 +1,14 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'AIVOLT — AI-Powered Trading',
   description: 'Your money. Our AI. Zero effort.',
-  keywords: 'AI trading, stock market, India, NIFTY, algorithmic trading',
-  icons: {
-    icon: '/favicon.ico',
-  },
+  icons: { icon: '/favicon.ico' },
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -29,19 +19,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className={`${inter.className} bg-bg-primary text-text-primary antialiased`}>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            style: {
-              background: '#131929',
-              color: '#e8eaf6',
-              border: '1px solid #1e2d4a',
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: '13px',
-            },
-          }}
-        />
+      <body style={{ fontFamily: 'Inter, sans-serif' }} className="bg-bg-primary text-text-primary antialiased">
+        <Toaster position="top-right" toastOptions={{
+          style: { background: '#131929', color: '#e8eaf6', border: '1px solid #1e2d4a', fontFamily: 'JetBrains Mono, monospace', fontSize: '13px' },
+        }} />
         {children}
       </body>
     </html>

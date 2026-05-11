@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
+import { supabase } from '@/lib/supabase'
 import {
   Bot, TrendingUp, Shield, Zap, ChevronRight,
   BarChart2, Clock, Lock, Star, ArrowRight
